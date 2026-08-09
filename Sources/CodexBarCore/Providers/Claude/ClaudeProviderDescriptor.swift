@@ -528,6 +528,7 @@ struct ClaudeOAuthFetchStrategy: ProviderFetchStrategy {
     #if DEBUG
     @TaskLocal static var nonInteractiveCredentialRecordOverride: ClaudeOAuthCredentialRecord?
     @TaskLocal static var claudeCLIAvailableOverride: Bool?
+    @TaskLocal static var directCredentialIsMissingOverride: Bool?
     #endif
 
     private func loadNonInteractiveCredentialRecord(environment: [String: String]) -> ClaudeOAuthCredentialRecord? {
@@ -546,6 +547,9 @@ struct ClaudeOAuthFetchStrategy: ProviderFetchStrategy {
 
     func directCredentialIsMissing(environment: [String: String]) -> Bool {
         #if DEBUG
+        if let override = Self.directCredentialIsMissingOverride {
+            return override
+        }
         if Self.nonInteractiveCredentialRecordOverride != nil {
             return false
         }
@@ -986,7 +990,10 @@ struct ClaudeCLIFetchStrategy: ProviderFetchStrategy {
             guard let binary = ClaudeCLIResolver.resolvedBinaryPath(environment: context.env) else { return false }
             return ClaudeCLIBackgroundAvailability.allowsBackgroundAutoUsageFetch(
                 binary: binary,
-                environment: context.env)
+                environment: context.env,
+                oauthCredentialsConfirmedAbsent: {
+                    ClaudeOAuthFetchStrategy().directCredentialIsMissing(environment: context.env)
+                })
         }
 
         // The interactive Claude REPL can open browser OAuth when it starts logged out. CLI-runtime paths
@@ -1100,10 +1107,26 @@ enum ClaudeCLIBackgroundAvailability {
             || ClaudeOAuthKeychainPromptPreference.storedMode() == .always
     }
 
-    static func allowsBackgroundAutoUsageFetch(binary: String, environment: [String: String]) -> Bool {
+    /// - Parameter oauthCredentialsConfirmedAbsent: A prompt-free, no-UI probe proving the OAuth step ahead
+    ///   of this one is durably dead (not merely denied). Consulted lazily, only when no marker exists at
+    ///   all for this profile — a marker that *is* established but denied by prompt policy or Keychain-
+    ///   disable revocation is a deliberate, already-adjudicated gate that this never second-guesses.
+    static func allowsBackgroundAutoUsageFetch(
+        binary: String,
+        environment: [String: String],
+        oauthCredentialsConfirmedAbsent: () -> Bool = { false }) -> Bool
+    {
         guard ProviderInteractionContext.current == .background else { return true }
         guard KeychainAccessGate.isExplicitlyDisabled else {
-            return self.allowsOpaqueChildExecution(binary: binary, environment: environment)
+            if self.allowsOpaqueChildExecution(binary: binary, environment: environment) {
+                return true
+            }
+            guard !self.isEstablished(binary: binary, environment: environment) else { return false }
+            // The marker gate above never gets a chance to be set when the OAuth step ahead of this one
+            // is durably dead: it is only recorded by a prior *successful* user-initiated CLI fetch, and a
+            // scheduled refresh never reaches user-initiated status. Breaking that deadlock here mirrors
+            // explicit OAuth mode's own absence check (`ClaudeOAuthPlanningAvailability`).
+            return oauthCredentialsConfirmedAbsent()
         }
         // Disable Keychain explicitly permits one owner-CLI usage attempt on a cold profile. A failed attempt
         // records revocation below, preventing each background timer tick from retrying until a foreground success.
