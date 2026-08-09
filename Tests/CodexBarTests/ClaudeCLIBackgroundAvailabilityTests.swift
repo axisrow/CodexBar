@@ -146,6 +146,33 @@ struct ClaudeCLIBackgroundAvailabilityTests {
     }
 
     @Test
+    func `enabled Keychain does not fall back to the OAuth absence probe for an unidentified profile`()
+        async throws
+    {
+        let strategy = self.makeStrategy()
+        // No profile is created here: the config file is verifiably absent, so
+        // `ClaudeAccountProfile.identifiedSessionScope` returns nil and `captureMarker` can never produce a
+        // marker for this environment — there is nothing to establish, revoke, or bind a background attempt to.
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codexbar-claude-unidentified-profile-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let context = self.makeContext(environment: ["CLAUDE_CONFIG_DIR": root.path])
+
+        // Keychain enabled, prompt policy not `.always`, no established marker: `allowsBackgroundAutoUsageFetch`
+        // would deny on its own. The deadlock-breaker only exists to unblock a profile CodexBar can identify
+        // but has never seen a successful foreground fetch for — it must not fire for a profile with no
+        // identity at all, since a failed attempt here could never be recorded as a revocation.
+        await self.withBackgroundGates(
+            keychainDisabled: false,
+            promptMode: .onlyOnUserAction,
+            oauthCredentialsMissing: true)
+        {
+            #expect(await !strategy.isAvailable(context))
+        }
+    }
+
+    @Test
     func `user initiated explicit OAuth retains interactive CLI recovery`() async {
         let strategy = self.makeStrategy()
         let context = self.makeContext(sourceMode: .oauth)
