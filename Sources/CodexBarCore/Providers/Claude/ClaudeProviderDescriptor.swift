@@ -1122,6 +1122,16 @@ enum ClaudeCLIBackgroundAvailability {
                 return true
             }
             guard !self.isEstablished(binary: binary, environment: environment) else { return false }
+            // A marker that was established and then revoked by a failed foreground fetch is a deliberate,
+            // already-adjudicated "not available right now" outcome — `isEstablished` alone can't see it,
+            // since revocation removes the marker from the established set. The deadlock-breaker below
+            // exists only for profiles that never reached user-initiated status at all; a revoked profile
+            // already tried and must wait for the next foreground success, not be re-permitted here.
+            if let marker = self.captureMarker(binary: binary, environment: environment),
+               self.store.isRevoked(marker)
+            {
+                return false
+            }
             // The marker gate above never gets a chance to be set when the OAuth step ahead of this one
             // is durably dead: it is only recorded by a prior *successful* user-initiated CLI fetch, and a
             // scheduled refresh never reaches user-initiated status. Breaking that deadlock here mirrors

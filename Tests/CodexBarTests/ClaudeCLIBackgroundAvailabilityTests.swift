@@ -114,6 +114,38 @@ struct ClaudeCLIBackgroundAvailabilityTests {
     }
 
     @Test
+    func `enabled Keychain revocation is not bypassed by the OAuth absence deadlock breaker`() async throws {
+        let strategy = self.makeStrategy()
+        let profile = try self.makeProfile(accountID: "account-a")
+        defer { try? FileManager.default.removeItem(at: profile.root) }
+        let context = self.makeContext(environment: profile.environment)
+        let fetchOverride: @Sendable (String, TimeInterval, Bool) async throws
+            -> ClaudeStatusSnapshot = { _, _, _ in
+                throw ExpectedFetchError.failed
+            }
+
+        // A revoked marker is a deliberate, already-adjudicated "not available right now" outcome from a
+        // failed foreground fetch. It must not be second-guessed by the deadlock-breaker even when OAuth
+        // credentials are confirmed durably absent — that escape hatch exists only for profiles that never
+        // reached user-initiated status at all, not for ones that tried and failed.
+        await self.withBackgroundGates(
+            keychainDisabled: false,
+            promptMode: .always,
+            establishedBinary: "/bin/echo",
+            establishedEnvironment: context.env,
+            oauthCredentialsMissing: true)
+        {
+            #expect(await strategy.isAvailable(context))
+            await #expect(throws: ExpectedFetchError.self) {
+                try await ClaudeStatusProbe.$fetchOverride.withValue(fetchOverride) {
+                    try await strategy.fetch(context)
+                }
+            }
+            #expect(await !strategy.isAvailable(context))
+        }
+    }
+
+    @Test
     func `user initiated explicit OAuth retains interactive CLI recovery`() async {
         let strategy = self.makeStrategy()
         let context = self.makeContext(sourceMode: .oauth)
