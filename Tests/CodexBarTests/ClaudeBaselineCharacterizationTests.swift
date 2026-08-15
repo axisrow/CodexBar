@@ -509,7 +509,7 @@ struct ClaudeBaselineCharacterizationTests {
             }
         }
 
-        #expect(FileManager.default.fileExists(atPath: invocationLog.path))
+        #expect(!FileManager.default.fileExists(atPath: invocationLog.path))
     }
 
     @Test
