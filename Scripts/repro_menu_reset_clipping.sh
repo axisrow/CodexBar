@@ -14,9 +14,9 @@ ALL_LANGUAGES=0
 BUILD_FIRST=0
 KEEP_RUNNING=0
 
-# Kept in sync with AppLanguage.allCases via MenuResetClippingHarness.supportedLanguageCodes,
-# which MenuResetClippingHarnessTests asserts covers every non-system language.
-LANGUAGES=(en zh-Hans zh-Hant ja es pt-BR ko de fr ar it vi nl tr uk ru id pl fa th gl ca sv)
+# Populated from the binary's own AppLanguage.allCases (see --list-languages) once the app
+# bundle is resolved, so adding a language cannot silently skip a locale in the matrix.
+LANGUAGES=()
 
 usage() {
   cat <<'EOF'
@@ -27,7 +27,7 @@ Options:
   --language CODE         Language to test (default: ru).
   --reset-style STYLE     countdown or absolute (default: countdown).
   --screenshot PATH       Save one menu-window PNG at PATH.
-  --all-languages         Capture countdown and absolute PNGs for all 23 locales.
+  --all-languages         Capture countdown and absolute PNGs for every app locale.
   --keep-running          Leave the single harness instance running after capture.
   --help                  Show this help.
 EOF
@@ -68,10 +68,24 @@ ARTIFACT_DIR="$(mktemp -d /private/tmp/codexbar-reset-layout.XXXXXX)"
 APP_COPY="$ARTIFACT_DIR/CodexBar.app"
 cp -R "$APP_BUNDLE" "$APP_COPY"
 APP_BINARY="$APP_COPY/Contents/MacOS/CodexBar"
-CLANG_CACHE="$ARTIFACT_DIR/clang-module-cache"
-SWIFT_CACHE="$ARTIFACT_DIR/swift-module-cache"
-mkdir -p "$CLANG_CACHE" "$SWIFT_CACHE"
 printf 'Artifacts: %s\n' "$ARTIFACT_DIR"
+
+# Compile the capture tool once: interpreting it per capture cost ~2.7s each, which dominated
+# a full --all-languages run (46 captures).
+CAPTURE_BINARY="$ARTIFACT_DIR/capture_menu_window"
+swiftc -Onone -Xfrontend -disable-availability-checking \
+  -o "$CAPTURE_BINARY" "$SCRIPT_DIR/capture_menu_window.swift"
+
+if [[ "$ALL_LANGUAGES" == 1 ]]; then
+  while IFS= read -r code; do
+    [[ -n "$code" ]] && LANGUAGES+=("$code")
+  done < <("$APP_BINARY" --list-languages)
+  if [[ "${#LANGUAGES[@]}" == 0 ]]; then
+    printf 'ERROR: could not read the language list from %s (debug build required).\n' "$APP_BINARY" >&2
+    exit 1
+  fi
+  printf 'Languages: %s\n' "${#LANGUAGES[@]}"
+fi
 
 click_menu() {
   local pid="$1"
@@ -130,9 +144,7 @@ capture_one() {
   fi
 
   click_menu "$pid" >/dev/null
-  CLANG_MODULE_CACHE_PATH="$CLANG_CACHE" SWIFT_MODULECACHE_PATH="$SWIFT_CACHE" \
-    swift -Xfrontend -disable-availability-checking \
-    "$SCRIPT_DIR/capture_menu_window.swift" --pid "$pid" --output "$output"
+  "$CAPTURE_BINARY" --pid "$pid" --output "$output"
   printf 'Screenshot: %s\n' "$output"
 
   if [[ "$KEEP_RUNNING" == 1 && "$ALL_LANGUAGES" == 0 ]]; then

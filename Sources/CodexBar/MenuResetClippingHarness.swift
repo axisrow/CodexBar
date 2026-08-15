@@ -7,10 +7,17 @@ enum MenuResetClippingHarness {
     static let launchArgument = "--repro-menu-reset-clipping"
     static let languageArgument = "--language"
     static let resetStyleArgument = "--reset-style"
+    static let listLanguagesArgument = "--list-languages"
 
     static let supportedLanguageCodes = AppLanguage.allCases
         .filter { $0 != .system }
         .map(\.rawValue)
+
+    /// Lets the capture script read the language list from this single source of truth instead of
+    /// restating it, so adding an `AppLanguage` case cannot silently skip a locale in the matrix.
+    static func isLanguageListRequested(arguments: [String] = CommandLine.arguments) -> Bool {
+        arguments.dropFirst().contains(self.listLanguagesArgument)
+    }
 
     /// Resolved once: the launch arguments cannot change for the lifetime of the process,
     /// and this is read from menu-rendering paths.

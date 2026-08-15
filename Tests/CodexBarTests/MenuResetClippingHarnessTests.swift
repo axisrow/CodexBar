@@ -37,6 +37,12 @@ struct MenuResetClippingHarnessTests {
     }
 
     @Test
+    func `detects the language list request`() {
+        #expect(MenuResetClippingHarness.isLanguageListRequested(arguments: ["CodexBar", "--list-languages"]))
+        #expect(!MenuResetClippingHarness.isLanguageListRequested(arguments: ["CodexBar"]))
+    }
+
+    @Test
     func `uses the screenshot provider ordering`() {
         let enabled = MenuResetClippingHarness.makeConfig().providers
             .filter { $0.enabled == true }

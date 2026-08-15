@@ -26,6 +26,12 @@ enum CodexBarEntryPoint {
         if CodexBarCoreResourceSmoke.isRequested() {
             exit(CodexBarCoreResourceSmoke.run())
         }
+        #if DEBUG
+        if MenuResetClippingHarness.isLanguageListRequested() {
+            print(MenuResetClippingHarness.supportedLanguageCodes.joined(separator: "\n"))
+            exit(0)
+        }
+        #endif
         guard CodexBarLaunchMode.resolve(arguments: CommandLine.arguments) == .application else {
             return
         }
