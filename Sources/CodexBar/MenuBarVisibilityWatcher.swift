@@ -264,8 +264,19 @@ extension StatusItemController {
             windowSnapshots: windowSnapshots,
             detectTahoeBlockedStatusItem: self.canDetectTahoeBlockedStatusItem)
         else {
+            VisibilityHarness.record(
+                "startup_healthy",
+                snapshots: snapshots,
+                evidence: evidence,
+                windows: self.statusItemWindowDiagnosticsDescription(windowSnapshots))
             return
         }
+
+        VisibilityHarness.record(
+            "startup_recovery_attempt",
+            snapshots: snapshots,
+            evidence: evidence,
+            windows: self.statusItemWindowDiagnosticsDescription(windowSnapshots))
 
         self.menuLogger.error(
             "Status item failed to materialize or remained detached; recreating status items",
@@ -290,6 +301,11 @@ extension StatusItemController {
             self.menuLogger.info(
                 "Status item materialized after recreation",
                 metadata: ["snapshots": recoveredSnapshots.map(\.description).joined(separator: " | ")])
+            VisibilityHarness.record(
+                "startup_recovered",
+                snapshots: recoveredSnapshots,
+                evidence: recoveredEvidence,
+                windows: self.statusItemWindowDiagnosticsDescription(recoveredWindowSnapshots))
             return
         }
 
@@ -300,6 +316,11 @@ extension StatusItemController {
                 "evidence": recoveredEvidence.map(\.description).joined(separator: " | "),
                 "windows": self.statusItemWindowDiagnosticsDescription(recoveredWindowSnapshots),
             ])
+        VisibilityHarness.record(
+            "startup_still_blocked",
+            snapshots: recoveredSnapshots,
+            evidence: recoveredEvidence,
+            windows: self.statusItemWindowDiagnosticsDescription(recoveredWindowSnapshots))
         guard #available(macOS 26.0, *),
               MenuBarVisibilityWatcher.shouldShowGuidance(defaults: self.settings.userDefaults, now: now)
         else {

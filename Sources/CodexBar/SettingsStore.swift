@@ -238,6 +238,9 @@ final class SettingsStore {
     @ObservationIgnored var providerConfigFingerprints: [ProviderInstanceID: Data] = [:]
 
     static func shouldBridgeSharedDefaults(for userDefaults: UserDefaults) -> Bool {
+        if DiagnosticHarness.isIsolationEnabled {
+            return false
+        }
         if !self.isRunningTests {
             return true
         }
@@ -284,22 +287,27 @@ final class SettingsStore {
         antigravityOAuthCredentialsStore: AntigravityOAuthCredentialsStore = AntigravityOAuthCredentialsStore(),
         performInitialProviderDetection: Bool = !SettingsStore.isRunningTests)
     {
-        if !Self.isRunningTests {
+        let isDiagnosticHarness = DiagnosticHarness.isIsolationEnabled
+        // Tests and the diagnostic harnesses share a rule: never touch the user's live state.
+        let isSyntheticEnvironment = Self.isRunningTests || isDiagnosticHarness
+        if !isSyntheticEnvironment {
             _ = UserProviderPluginRegistry.refresh()
         }
         // Capture this before app-group/config migrations can create prior-installation state.
-        let hadExistingConfig = (try? configStore.load()) != nil
+        let hadExistingConfig = !isDiagnosticHarness && (try? configStore.load()) != nil
         let hadPreviousInstallationState = hadExistingConfig || Self.hadPreviousAppLaunch(userDefaults: userDefaults)
         let appGroupID = AppGroupSupport.currentGroupID()
         let appGroupMigration: AppGroupSupport.MigrationResult
-        if Self.isRunningTests {
+        if isDiagnosticHarness {
+            appGroupMigration = AppGroupSupport.MigrationResult(status: .targetUnavailable)
+        } else if Self.isRunningTests {
             appGroupMigration = AppGroupSupport.migrateLegacyDataIfNeeded(standardDefaults: userDefaults)
         } else {
             Self.scheduleAppGroupMigration()
             appGroupMigration = AppGroupSupport.MigrationResult(status: .targetUnavailable)
         }
         let sharedDefaultsAvailable = Self.sharedDefaults != nil
-        if !Self.isRunningTests {
+        if !isSyntheticEnvironment {
             CodexBarLog.logger(LogCategories.settings).info(
                 "App group resolved",
                 metadata: [
@@ -332,10 +340,14 @@ final class SettingsStore {
             ampCookieStore: ampCookieStore,
             copilotTokenStore: copilotTokenStore,
             tokenAccountStore: tokenAccountStore)
-        let config = CodexBarConfigMigrator.loadOrMigrate(
-            configStore: configStore,
-            userDefaults: userDefaults,
-            stores: legacyStores)
+        let config = if isDiagnosticHarness {
+            DiagnosticHarness.makeConfig()
+        } else {
+            CodexBarConfigMigrator.loadOrMigrate(
+                configStore: configStore,
+                userDefaults: userDefaults,
+                stores: legacyStores)
+        }
         self.userDefaults = userDefaults
         self.configStore = configStore
         self.antigravityOAuthCredentialsStore = antigravityOAuthCredentialsStore
@@ -352,12 +364,14 @@ final class SettingsStore {
         CodexBarLog.setFileLoggingEnabled(self.debugFileLoggingEnabled)
         userDefaults.removeObject(forKey: "showCodexUsage")
         userDefaults.removeObject(forKey: "showClaudeUsage")
-        LaunchAtLoginManager.setEnabled(self.launchAtLogin)
-        if performInitialProviderDetection {
-            self.runInitialProviderDetectionIfNeeded()
+        if !isDiagnosticHarness {
+            LaunchAtLoginManager.setEnabled(self.launchAtLogin)
+            if performInitialProviderDetection {
+                self.runInitialProviderDetectionIfNeeded()
+            }
+            self.ensureAlibabaProviderAutoEnabledIfNeeded()
+            self.applyTokenCostDefaultIfNeeded()
         }
-        self.ensureAlibabaProviderAutoEnabledIfNeeded()
-        self.applyTokenCostDefaultIfNeeded()
         if self.claudeUsageDataSource != .cli {
             if Self.isRunningTests {
                 self.claudeWebExtrasEnabled = false
@@ -377,8 +391,10 @@ final class SettingsStore {
         } else {
             self.defaultsState.openAIWebAccessEnabled = resolvedOpenAIWebAccessEnabled
         }
-        KeychainAccessGate.isDisabled = self.debugDisableKeychainAccess
-        self.startConfigFileWatcher()
+        KeychainAccessGate.isDisabled = isDiagnosticHarness || self.debugDisableKeychainAccess
+        if !isDiagnosticHarness {
+            self.startConfigFileWatcher()
+        }
     }
 
     deinit {

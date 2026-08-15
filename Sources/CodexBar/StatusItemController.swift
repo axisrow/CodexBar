@@ -53,12 +53,22 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
         case merged
         case provider(ProviderInstanceID)
 
+        /// Namespaces the persisted status-item positions. Diagnostic modes get their own prefix so
+        /// they never read or overwrite the positions the user's real status items saved.
+        static var autosavePrefix: String {
+            switch DiagnosticHarness.current {
+            case .visibility: "codexbar-visibility-harness"
+            case .menuResetClipping: "codexbar-reset-clipping-harness"
+            case nil: "codexbar"
+            }
+        }
+
         var autosaveName: String {
             switch self {
             case .merged:
-                "codexbar-merged"
+                "\(Self.autosavePrefix)-merged"
             case let .provider(provider):
-                "codexbar-\(provider.rawValue)"
+                "\(Self.autosavePrefix)-\(provider.rawValue)"
             }
         }
 
@@ -444,7 +454,7 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
         self.lastWidgetDisplaySettingsSignature = self.widgetDisplaySettingsSignature()
         self.wireBindings()
         self.wireAgentSessionUpdates()
-        if !SettingsStore.isRunningTests {
+        if !SettingsStore.isRunningTests, !DiagnosticHarness.isIsolationEnabled {
             self.agentSessions.start()
         }
         self.updateVisibility()

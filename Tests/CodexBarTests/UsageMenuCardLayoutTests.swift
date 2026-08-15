@@ -213,6 +213,56 @@ struct UsageMenuCardLayoutTests {
         #expect(longHeight - shortHeight < 20)
     }
 
+    @Test
+    func `long localized reset text uses a stacked header at standard width`() {
+        let compactHeight = Self.resetHeaderHeight(title: "Gemini weekly", resetText: "Resets in 2h")
+        let stackedHeight = Self.resetHeaderHeight(title: "Gemini weekly", resetText: "重置于 8月17日 晚上11:52")
+
+        #expect(stackedHeight - compactHeight > Self.heightTolerance)
+        #expect(stackedHeight - compactHeight < 24)
+    }
+
+    @Test
+    func `all app languages keep countdown and absolute reset headers bounded`() {
+        let title = "Gemini weekly <1% remaining"
+        let compactHeight = Self.resetHeaderHeight(title: title, resetText: "Resets in 2h")
+
+        for language in MenuResetClippingHarness.supportedLanguageCodes {
+            for (key, suffix) in [("Resets in %@", "7d 23h"), ("Resets %@", "Aug 17 11:52")] {
+                let resetText = CodexBarLocalizationOverride.$appLanguage.withValue(language) {
+                    String(format: L(key), suffix)
+                }
+                let height = Self.resetHeaderHeight(title: title, resetText: resetText)
+
+                #expect(height >= compactHeight - Self.heightTolerance, "\(language): \(key)")
+                #expect(height <= compactHeight + 48, "\(language): \(key)")
+            }
+        }
+    }
+
+    /// Height of a single-metric card whose only variable content is the reset header.
+    private static func resetHeaderHeight(
+        title: String,
+        resetText: String,
+        width: CGFloat = 296) -> CGFloat
+    {
+        let card = UsageMenuCardView(model: Self.model(metrics: [
+            UsageMenuCardView.Model.Metric(
+                id: "weekly",
+                title: title,
+                percent: 1,
+                percentStyle: .left,
+                resetText: resetText,
+                detailText: nil,
+                detailLeftText: nil,
+                detailRightText: nil,
+                pacePercent: nil,
+                paceOnTop: true),
+        ]), width: width)
+        return NSHostingController(rootView: card)
+            .sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height
+    }
+
     private static func model(
         metrics: [UsageMenuCardView.Model.Metric] = [],
         usageNotes: [String] = [],
