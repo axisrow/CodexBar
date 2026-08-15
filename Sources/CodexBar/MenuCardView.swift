@@ -571,8 +571,6 @@ private struct MetricRowHeader: View {
     var body: some View {
         if let resetText {
             ViewThatFits(in: .horizontal) {
-                // Both labels are measured at their intrinsic width so ViewThatFits rejects this
-                // candidate on overflow; without it the title would silently elide and "fit".
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     self.titleLabel
                         .fixedSize(horizontal: true, vertical: false)
@@ -580,8 +578,9 @@ private struct MetricRowHeader: View {
                     self.resetLabel(resetText)
                         .fixedSize(horizontal: true, vertical: false)
                 }
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .trailing, spacing: 2) {
                     self.titleLabel
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     self.resetLabel(resetText)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -1038,6 +1037,9 @@ extension UsageMenuCardView.Model {
                 }
             }
         }
+        if input.provider == .sub2api {
+            details = Self.sub2APILocalizedDetails(details)
+        }
         guard input.hidePersonalInfo else { return details }
         return details.compactMap { section in
             let rows = section.rows.compactMap { row in
@@ -1076,6 +1078,13 @@ extension UsageMenuCardView.Model {
     {
         if let email = snapshot?.accountEmail(for: provider), !email.isEmpty {
             return email
+        }
+        // Provider-specific by design: Cursor app auth can expose only a subject ID, so its card needs this fallback.
+        if provider == .cursor,
+           let accountID = snapshot?.identity(for: .cursor)?.accountID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !accountID.isEmpty
+        {
+            return accountID.split(separator: "|", omittingEmptySubsequences: true).last.map(String.init) ?? accountID
         }
         if metadata.usesAccountFallback || accountIsAuthoritative,
            let email = account.email, !email.isEmpty
@@ -1266,6 +1275,10 @@ extension UsageMenuCardView.Model {
             metrics.append(Self.primaryMetric(
                 input: input,
                 primary: primary,
+                bindingProjection: Self.bindingQuotaProjection(
+                    input: input,
+                    primary: primary,
+                    snapshot: snapshot),
                 percentStyle: percentStyle,
                 title: labels.primary))
         }
@@ -1347,6 +1360,7 @@ extension UsageMenuCardView.Model {
     private static func primaryMetric(
         input: Input,
         primary: RateWindow,
+        bindingProjection: RateWindowBindingQuotaProjection? = nil,
         percentStyle: PercentStyle,
         title: String? = nil) -> Metric
     {
@@ -1359,13 +1373,26 @@ extension UsageMenuCardView.Model {
             primary: primary)
         Self.applyPrimaryBalancePresentation(&presentation, input: input, primary: primary)
         Self.applyPrimaryResetPresentation(&presentation, input: input, primary: primary)
-        Self.applyPrimaryPacePresentation(&presentation, input: input, primary: primary)
+        if bindingProjection == nil {
+            Self.applyPrimaryPacePresentation(&presentation, input: input, primary: primary)
+        }
         Self.applyPrimaryFinalOverrides(&presentation, input: input, primary: primary)
+        if let bindingProjection {
+            let resetWindow = RateWindow(
+                usedPercent: bindingProjection.usedPercent,
+                windowMinutes: primary.windowMinutes,
+                resetsAt: bindingProjection.resetsAt,
+                resetDescription: bindingProjection.resetDescription)
+            presentation.resetText = Self.resetText(
+                for: resetWindow,
+                style: input.resetTimeDisplayStyle,
+                now: input.now)
+        }
+        let displayedUsedPercent = bindingProjection?.usedPercent ?? primary.usedPercent
         return Metric(
             id: "primary",
             title: title ?? L(input.metadata.sessionLabel),
-            percent: Self.clamped(
-                input.usageBarsShowUsed ? primary.usedPercent : primary.remainingPercent),
+            percent: Self.clamped(input.usageBarsShowUsed ? displayedUsedPercent : 100 - displayedUsedPercent),
             percentStyle: percentStyle,
             statusText: presentation.statusText,
             resetText: presentation.resetText,
