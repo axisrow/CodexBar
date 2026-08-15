@@ -50,13 +50,21 @@ private func isRunningTestsProcess() -> Bool {
     isRunningTestsProcessAtStartup
 }
 
+#if DEBUG
+/// Resolved once: `resolvedAppLanguage()` runs on every `L(…)` and on every closed-menu rebuild tick.
+private let menuResetClippingHarnessLanguage: String? =
+    MenuResetClippingHarness.isEnabled ? MenuResetClippingHarness.language() : nil
+#endif
+
 private func resolvedAppLanguage() -> String {
     if let override = CodexBarLocalizationOverride.appLanguage {
         return override
     }
     #if DEBUG
-    if MenuResetClippingHarness.isEnabled {
-        return MenuResetClippingHarness.language()
+    // The harness runs against an isolated defaults suite, but appLanguageDefaults() resolves to
+    // .standard inside a bundled app, so its language cannot travel through the normal read below.
+    if let harnessLanguage = menuResetClippingHarnessLanguage {
+        return harnessLanguage
     }
     #endif
     if isRunningTestsProcess() {

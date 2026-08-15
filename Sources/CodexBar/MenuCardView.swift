@@ -571,6 +571,8 @@ private struct MetricRowHeader: View {
     var body: some View {
         if let resetText {
             ViewThatFits(in: .horizontal) {
+                // Both labels are measured at their intrinsic width so ViewThatFits rejects this
+                // candidate on overflow; without it the title would silently elide and "fit".
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     self.titleLabel
                         .fixedSize(horizontal: true, vertical: false)

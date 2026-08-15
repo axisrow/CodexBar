@@ -11,12 +11,16 @@ enum DiagnosticHarness {
     /// Resolved once: launch arguments cannot change for the lifetime of the process, and this is
     /// read from menu-rendering paths.
     static let current: DiagnosticHarness? = {
+        // Both modes swap in throwaway defaults and disable the Keychain gate, so neither may be
+        // reachable from a shipped build: release binaries must ignore these launch arguments.
+        #if DEBUG
         if VisibilityHarness.isRequested(arguments: CommandLine.arguments) {
             return .visibility
         }
         if MenuResetClippingHarness.isEnabled {
             return .menuResetClipping
         }
+        #endif
         return nil
     }()
 

@@ -28,7 +28,9 @@ struct MenuResetClippingHarnessTests {
 
     @Test
     func `lists every non-system app language`() {
-        #expect(MenuResetClippingHarness.supportedLanguageCodes.count == 23)
+        // Assert the property, not a literal count: adding a language must not fail this test.
+        #expect(MenuResetClippingHarness.supportedLanguageCodes.count == AppLanguage.allCases.count - 1)
+        #expect(!MenuResetClippingHarness.supportedLanguageCodes.contains(AppLanguage.system.rawValue))
         #expect(MenuResetClippingHarness.supportedLanguageCodes.contains("ru"))
         #expect(MenuResetClippingHarness.supportedLanguageCodes.contains("zh-Hans"))
         #expect(!MenuResetClippingHarness.supportedLanguageCodes.contains(""))
