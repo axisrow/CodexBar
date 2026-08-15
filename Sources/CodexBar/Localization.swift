@@ -54,6 +54,11 @@ private func resolvedAppLanguage() -> String {
     if let override = CodexBarLocalizationOverride.appLanguage {
         return override
     }
+    #if DEBUG
+    if MenuResetClippingHarness.isEnabled {
+        return MenuResetClippingHarness.language()
+    }
+    #endif
     if isRunningTestsProcess() {
         return "en"
     }

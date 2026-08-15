@@ -44,7 +44,9 @@ struct CodexBarApp: App {
 
     init() {
         let env = ProcessInfo.processInfo.environment
-        let storedLevel = CodexBarLog.parseLevel(UserDefaults.standard.string(forKey: "debugLogLevel")) ?? .verbose
+        let isDiagnosticHarness = DiagnosticHarness.isIsolationEnabled
+        let userDefaults = isDiagnosticHarness ? DiagnosticHarness.makeDefaults() : UserDefaults.standard
+        let storedLevel = CodexBarLog.parseLevel(userDefaults.string(forKey: "debugLogLevel")) ?? .verbose
         let level = CodexBarLog.parseLevel(env["CODEXBAR_LOG_LEVEL"]) ?? storedLevel
         CodexBarLog.bootstrapIfNeeded(.init(
             destination: .oslog(subsystem: "com.steipete.codexbar"),
@@ -64,25 +66,37 @@ struct CodexBarApp: App {
                 "built": buildTimestamp,
             ])
 
-        KeychainAccessGate.isDisabled = UserDefaults.standard.bool(forKey: "debugDisableKeychainAccess")
+        KeychainAccessGate.isDisabled = isDiagnosticHarness || userDefaults.bool(forKey: "debugDisableKeychainAccess")
         KeychainPromptCoordinator.install()
         if MainThreadHangWatchdog.isEnabledForCurrentProcess {
             MainThreadHangWatchdog.shared.start()
         }
 
         let preferencesSelection = PreferencesSelection()
-        let settings = SettingsStore()
+        let settings = SettingsStore(
+            userDefaults: userDefaults,
+            performInitialProviderDetection: !isDiagnosticHarness)
         Self.applyLanguagePreference(from: settings)
         configureUsageFormatterLocalizationProvider()
         let managedCodexAccountCoordinator = ManagedCodexAccountCoordinator()
-        managedCodexAccountCoordinator.onManagedAccountsDidChange = {
-            _ = settings.refreshCodexAccountReconciliationAfterManagedAccountsDidChange()
+        if !isDiagnosticHarness {
+            managedCodexAccountCoordinator.onManagedAccountsDidChange = {
+                _ = settings.refreshCodexAccountReconciliationAfterManagedAccountsDidChange()
+            }
+            _ = settings.persistResolvedCodexActiveSourceCorrectionIfNeeded()
         }
-        _ = settings.persistResolvedCodexActiveSourceCorrectionIfNeeded()
         let fetcher = UsageFetcher()
         let browserDetection = BrowserDetection(cacheTTL: BrowserDetection.defaultCacheTTL)
-        let account = fetcher.loadAccountInfo()
-        let store = UsageStore(fetcher: fetcher, browserDetection: browserDetection, settings: settings)
+        let account = isDiagnosticHarness ? AccountInfo(email: nil, plan: nil) : fetcher.loadAccountInfo()
+        let store = UsageStore(
+            fetcher: fetcher,
+            browserDetection: browserDetection,
+            settings: settings,
+            startupBehavior: isDiagnosticHarness ? .testing : .automatic)
+        #if DEBUG
+        MenuResetClippingHarness.installFixture(in: store)
+        #endif
+        VisibilityHarness.record("app_initialized")
         let codexAccountPromotionCoordinator = CodexAccountPromotionCoordinator(
             settingsStore: settings,
             usageStore: store,
@@ -413,7 +427,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.preferencesSelection = dependencies.selection
         self.managedCodexAccountCoordinator = dependencies.managedCodexAccountCoordinator
         self.codexAccountPromotionCoordinator = dependencies.codexAccountPromotionCoordinator
-        self.cloudSyncCoordinator = CloudSyncCoordinator(settings: dependencies.settings, state: self.cloudSyncState)
+        if !DiagnosticHarness.isIsolationEnabled {
+            self.cloudSyncCoordinator = CloudSyncCoordinator(
+                settings: dependencies.settings,
+                state: self.cloudSyncState)
+        }
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -421,6 +439,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if DiagnosticHarness.isIsolationEnabled {
+            self.ensureStatusController()
+            VisibilityHarness.record("app_did_finish_launching")
+            return
+        }
         self.memoryPressureMonitor.start()
         #if DEBUG
         self.installDebugMemoryPressureObserverIfNeeded()

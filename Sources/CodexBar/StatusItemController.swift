@@ -56,7 +56,7 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
         var autosaveName: String {
             switch self {
             case .merged:
-                "codexbar-merged"
+                MenuResetClippingHarness.isEnabled ? "codexbar-reset-clipping-harness" : "codexbar-merged"
             case let .provider(provider):
                 "codexbar-\(provider.rawValue)"
             }
@@ -444,7 +444,7 @@ final class StatusItemController: NSObject, NSMenuDelegate, StatusItemControllin
         self.lastWidgetDisplaySettingsSignature = self.widgetDisplaySettingsSignature()
         self.wireBindings()
         self.wireAgentSessionUpdates()
-        if !SettingsStore.isRunningTests {
+        if !SettingsStore.isRunningTests, !DiagnosticHarness.isIsolationEnabled {
             self.agentSessions.start()
         }
         self.updateVisibility()
